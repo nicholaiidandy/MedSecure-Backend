@@ -2,15 +2,11 @@ pipeline {
     agent any
 
     tools {
-        nodejs 'nodejs-20'
-    }
-
-    options {
-        skipStagesAfterUnstable()
+        nodejs "nodejs-20"
     }
 
     environment {
-        APP_NAME = 'medsecure-backend'
+        APP_NAME = "medsecure-backend"
     }
 
     stages {
@@ -25,13 +21,13 @@ pipeline {
         stage('Workspace Info') {
             steps {
                 sh '''
-                echo "===== WORKSPACE ====="
-                pwd
-                ls -la
+                    echo "===== WORKSPACE ====="
+                    pwd
+                    ls -la
 
-                echo "===== NODE VERSION ====="
-                node -v
-                npm -v
+                    echo "===== NODE VERSION ====="
+                    node -v
+                    npm -v
                 '''
             }
         }
@@ -39,10 +35,9 @@ pipeline {
         stage('Install Dependencies') {
             steps {
                 sh '''
-                echo "===== INSTALL DEPENDENCIES ====="
+                    echo "===== INSTALL DEPENDENCIES ====="
 
-                npm install
-                npm install --save-dev @types/multer
+                    npm install
                 '''
             }
         }
@@ -50,9 +45,9 @@ pipeline {
         stage('Dependency Audit') {
             steps {
                 sh '''
-                echo "===== NPM AUDIT ====="
+                    echo "===== NPM AUDIT ====="
 
-                npm audit --audit-level=high || true
+                    npm audit --audit-level=high || true
                 '''
             }
         }
@@ -60,9 +55,9 @@ pipeline {
         stage('Build Project') {
             steps {
                 sh '''
-                echo "===== BUILD PROJECT ====="
+                    echo "===== BUILD PROJECT ====="
 
-                npm run build || true
+                    npm run build
                 '''
             }
         }
@@ -70,9 +65,9 @@ pipeline {
         stage('SAST - Semgrep') {
             steps {
                 sh '''
-                echo "===== SEMGREP SAST ====="
+                    echo "===== SEMGREP SAST ====="
 
-                semgrep --config=auto --exclude .env . || true
+                    semgrep --config=auto . || true
                 '''
             }
         }
@@ -80,19 +75,21 @@ pipeline {
         stage('Run Backend') {
             steps {
                 sh '''
-                echo "===== RUN BACKEND ====="
+                    echo "===== RUN BACKEND ====="
 
-                npm install -g pm2
+                    npm install -g pm2
 
-                pm2 delete ${APP_NAME} || true
+                    pm2 delete ${APP_NAME} || true
 
-                pm2 start npm --name ${APP_NAME} -- run dev || \
-                pm2 start dist/index.js --name ${APP_NAME} || \
-                npm start || true
+                    pm2 start npm --name ${APP_NAME} -- start
 
-                sleep 15
+                    sleep 15
 
-                pm2 logs ${APP_NAME} --lines 50 || true
+                    echo "===== PM2 STATUS ====="
+                    pm2 status
+
+                    echo "===== PM2 LOGS ====="
+                    pm2 logs ${APP_NAME} --lines 50 --nostream || true
                 '''
             }
         }
@@ -100,9 +97,12 @@ pipeline {
         stage('Health Check') {
             steps {
                 sh '''
-                echo "===== HEALTH CHECK ====="
+                    echo "===== HEALTH CHECK ====="
 
-                curl http://localhost:3000 || true
+                    curl -I http://localhost:3000 || true
+
+                    echo "===== PORT CHECK ====="
+                    netstat -tulpn | grep 3000 || true
                 '''
             }
         }
@@ -110,13 +110,13 @@ pipeline {
         stage('DAST - OWASP ZAP') {
             steps {
                 sh '''
-                echo "===== OWASP ZAP DAST ====="
+                    echo "===== OWASP ZAP DAST ====="
 
-                /opt/zaproxy/zap.sh \
-                -cmd \
-                -port 8090 \
-                -quickurl http://localhost:3000 \
-                -quickprogress || true
+                    /opt/zaproxy/zap.sh \
+                    -cmd \
+                    -port 8090 \
+                    -quickurl http://localhost:3000 \
+                    -quickprogress || true
                 '''
             }
         }
@@ -124,9 +124,9 @@ pipeline {
         stage('PM2 Status') {
             steps {
                 sh '''
-                echo "===== PM2 STATUS ====="
+                    echo "===== FINAL PM2 STATUS ====="
 
-                pm2 list || true
+                    pm2 list
                 '''
             }
         }
@@ -137,18 +137,14 @@ pipeline {
             archiveArtifacts artifacts: '**/*.log', allowEmptyArchive: true
 
             sh '''
-            echo "===== CLEANUP ====="
+                echo "===== CLEANUP ====="
 
-            pm2 save || true
+                pm2 save || true
             '''
         }
 
         success {
             echo 'Pipeline Success!'
-        }
-
-        unstable {
-            echo 'Pipeline Unstable!'
         }
 
         failure {
