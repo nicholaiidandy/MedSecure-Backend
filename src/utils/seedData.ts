@@ -23,9 +23,9 @@ const seedData = async () => {
     // CREATE USERS
     // =====================
     const doctor = await User.create({
-      name: 'Dr. John Smith',
-      email: 'doctor@medical.com',
-      password: 'doctor123',
+      name: 'Dr. Nicholai',
+      email: 'nicholai@doctor.com',
+      password: 'nicholai123',
       role: 'doctor',
     });
 
@@ -142,7 +142,7 @@ const seedData = async () => {
     // =====================
     console.log('\n🎉 Seeding completed successfully!');
     console.log('\n📋 Demo Credentials:');
-    console.log('Doctor: doctor@medical.com / doctor123');
+    console.log('Doctor: nicholai@doctor.com / nicholai123');
     console.log('Nurse: nurse@medical.com / nurse123');
     console.log('Admin: admin@medical.com / admin123');
 

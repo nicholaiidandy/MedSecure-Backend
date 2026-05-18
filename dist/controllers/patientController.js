@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import Patient from '../models/Patient.js';
 import { logAudit } from '../utils/auditLogger.js';
+import { withMetrics } from '../utils/queryMetrics.js';
 // @desc    Search registered patients (Users role='patient')
 // @route   GET /api/patients/search?q=
 // @access  Private (Doctor/Admin)
@@ -21,11 +22,11 @@ export const searchPatients = async (req, res) => {
         if (/^[0-9a-fA-F]{24}$/.test(query)) {
             orConditions.push({ _id: new mongoose.Types.ObjectId(query) });
         }
-        const patients = await Patient.find({
+        const patients = await withMetrics(Patient.find({
             $or: orConditions,
         })
             .select('name patientId contactInfo.email _id')
-            .limit(10);
+            .limit(10), 'Patient', 'find_search');
         res.status(200).json({
             success: true,
             count: patients.length,
@@ -45,7 +46,7 @@ export const searchPatients = async (req, res) => {
 // @access  Private
 export const getPatients = async (req, res) => {
     try {
-        const patients = await Patient.find().sort({ createdAt: -1 });
+        const patients = await withMetrics(Patient.find().sort({ createdAt: -1 }), 'Patient', 'find_all');
         res.status(200).json({
             success: true,
             count: patients.length,
@@ -65,7 +66,7 @@ export const getPatients = async (req, res) => {
 // @access  Private
 export const getPatient = async (req, res) => {
     try {
-        const patient = await Patient.findById(req.params.id);
+        const patient = await withMetrics(Patient.findById(req.params.id), 'Patient', 'findById');
         if (!patient) {
             return res.status(404).json({
                 success: false,

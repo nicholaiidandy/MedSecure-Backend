@@ -3,11 +3,13 @@ import User from '../models/User.js';
 import { AuthRequest } from '../middleware/auth.js';
 import { logAudit } from '../utils/auditLogger.js';
 import jwt from 'jsonwebtoken';
+import { withMetrics } from '../utils/queryMetrics.js';
 
 // Local generateToken
 const generateToken = (id: string): string => {
+  const expiresIn = (process.env.JWT_EXPIRE || '7d') as jwt.SignOptions['expiresIn'];
   return jwt.sign({ id }, process.env.JWT_SECRET || 'default-secret', {
-    expiresIn: process.env.JWT_EXPIRE || '7d',
+    expiresIn,
   });
 };
 
@@ -26,7 +28,11 @@ export const createDoctor = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    const userExists = await User.findOne({ email });
+    const userExists = await withMetrics(
+      User.findOne({ email }),
+      'User',
+      'findOne_check'
+    );
     if (userExists) {
       return res.status(400).json({
         success: false,
@@ -34,12 +40,16 @@ export const createDoctor = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    const doctor = await User.create({
-      name,
-      email,
-      password,
-      role: 'doctor'
-    });
+    const doctor = await withMetrics(
+      User.create({
+        name,
+        email,
+        password,
+        role: 'doctor'
+      }),
+      'User',
+      'create'
+    );
 
     await logAudit(req.user!, 'CREATE_DOCTOR', 'user', ipAddress, {
       resourceId: doctor._id.toString(),
@@ -70,7 +80,11 @@ export const createDoctor = async (req: AuthRequest, res: Response) => {
 // Get all users
 export const getUsers = async (req: AuthRequest, res: Response) => {
   try {
-    const users = await User.find().select('-password').sort({ createdAt: -1 });
+    const users = await withMetrics(
+      User.find().select('-password').sort({ createdAt: -1 }),
+      'User',
+      'find_all'
+    );
 
     res.status(200).json({
       success: true,
@@ -89,7 +103,11 @@ export const getUsers = async (req: AuthRequest, res: Response) => {
 // Get single user
 export const getUser = async (req: AuthRequest, res: Response) => {
   try {
-    const user = await User.findById(req.params.id).select('-password');
+    const user = await withMetrics(
+      User.findById(req.params.id).select('-password'),
+      'User',
+      'findById'
+    );
 
     if (!user) {
       return res.status(404).json({
@@ -118,10 +136,14 @@ export const updateUser = async (req: AuthRequest, res: Response) => {
   try {
     const { password, ...updateData } = req.body;
 
-    const user = await User.findByIdAndUpdate(req.params.id, updateData, {
-      new: true,
-      runValidators: true,
-    }).select('-password');
+    const user = await withMetrics(
+      User.findByIdAndUpdate(req.params.id, updateData, {
+        new: true,
+        runValidators: true,
+      }).select('-password'),
+      'User',
+      'findByIdAndUpdate'
+    );
 
     if (!user) {
       return res.status(404).json({
@@ -155,7 +177,11 @@ export const deleteUser = async (req: AuthRequest, res: Response) => {
   const ipAddress = req.ip || req.socket.remoteAddress || 'unknown';
 
   try {
-    const user = await User.findByIdAndDelete(req.params.id);
+    const user = await withMetrics(
+      User.findByIdAndDelete(req.params.id),
+      'User',
+      'findByIdAndDelete'
+    );
 
     if (!user) {
       return res.status(404).json({

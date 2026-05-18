@@ -2,7 +2,6 @@ import multer from 'multer';
 import { create as createIPFS } from 'ipfs-http-client';
 import crypto from 'crypto';
 import MedicalRecord from '../models/MedicalRecord.js';
-// import { ethers } from 'ethers'; // Uncomment for real blockchain integration
 const uploadToPinata = async (file, pinataJwt, pinataApiUrl) => {
     if (!pinataJwt) {
         throw new Error('PINATA_JWT is not set');
@@ -105,11 +104,7 @@ export const uploadLabFileToIPFS = async (req, res) => {
         }
         // Hash file (SHA256)
         const hash = crypto.createHash('sha256').update(req.file.buffer).digest('hex');
-        // (Stub) Simpan ke blockchain publik (Ethereum, dst)
-        // const provider = new ethers.JsonRpcProvider(process.env.ETH_RPC_URL);
-        // const contract = new ethers.Contract(process.env.CONTRACT_ADDRESS, abi, provider.getSigner());
-        // const tx = await contract.storeHash(hash, cid.toString());
-        // const txHash = tx.hash;
+        // Stub transaction hash for internal audit trail
         const txHash = '0xBLOCKCHAIN_TX_HASH_STUB';
         // Simpan ke database (medicalrecords.labFiles[])
         const record = await MedicalRecord.findById(recordId);

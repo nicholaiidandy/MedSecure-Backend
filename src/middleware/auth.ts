@@ -27,7 +27,7 @@ export const protect = async (req: AuthRequest, res: Response, next: NextFunctio
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'default-secret') as { id: string };
-    req.user = await User.findById(decoded.id);
+    req.user = (await User.findById(decoded.id)) ?? undefined;
 
     if (!req.user) {
       return res.status(401).json({

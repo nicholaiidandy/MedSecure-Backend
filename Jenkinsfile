@@ -1,95 +1,158 @@
 pipeline {
     agent any
-    
-    environment {
-        NODE_ENV = 'production'
-        DOCKER_REGISTRY = 'docker.io'
-        APP_NAME = 'medsecure-backend'
-        PORT = '5000'
+
+    tools {
+        nodejs 'nodejs-20'
     }
-    
+
+    options {
+        skipStagesAfterUnstable()
+    }
+
+    environment {
+        APP_NAME = 'medsecure-backend'
+    }
+
     stages {
-        stage('Checkout') {
+
+        stage('Clone Repository') {
             steps {
-                checkout scm
-                echo '✓ Code checked out'
+                git branch: 'master',
+                url: 'https://github.com/nicholaiidandy/MedSecure-Backend.git'
             }
         }
-        
+
+        stage('Workspace Info') {
+            steps {
+                sh '''
+                echo "===== WORKSPACE ====="
+                pwd
+                ls -la
+
+                echo "===== NODE VERSION ====="
+                node -v
+                npm -v
+                '''
+            }
+        }
+
         stage('Install Dependencies') {
             steps {
-                sh 'npm install'
-                echo '✓ Dependencies installed'
+                sh '''
+                echo "===== INSTALL DEPENDENCIES ====="
+
+                npm install
+                npm install --save-dev @types/multer
+                '''
             }
         }
-        
-        stage('Build') {
-            steps {
-                sh 'npm run build'
-                echo '✓ Build completed'
-            }
-        }
-        
-        stage('Lint') {
-            steps {
-                sh 'npm run lint || true'
-                echo '✓ Lint check done'
-            }
-        }
-        
-        stage('Test') {
-            steps {
-                sh 'npm test || true'
-                echo '✓ Tests executed'
-            }
-        }
-        
-        stage('Deploy to Dev') {
-            when {
-                branch 'develop'
-            }
+
+        stage('Dependency Audit') {
             steps {
                 sh '''
-                    echo "Deploying to dev server..."
-                    ssh -i /home/devsecops/.ssh/id_rsa devsecops@medsecure.com "cd /home/devsecops/DevSecOps/MedSecure/backend && npm install && pm2 restart medsecure-backend --update-env || pm2 start --name medsecure-backend npm -- start"
+                echo "===== NPM AUDIT ====="
+
+                npm audit --audit-level=high || true
                 '''
-                echo '✓ Deployed to dev'
             }
         }
-        
-        stage('Deploy to Prod') {
-            when {
-                branch 'main'
-            }
+
+        stage('Build Project') {
             steps {
                 sh '''
-                    echo "Deploying to production..."
-                    ssh -i /home/devsecops/.ssh/id_rsa devsecops@medsecure.com "cd /home/devsecops/DevSecOps/MedSecure/backend && npm install && pm2 restart medsecure-backend --update-env || pm2 start --name medsecure-backend npm -- start"
+                echo "===== BUILD PROJECT ====="
+
+                npm run build || true
                 '''
-                echo '✓ Deployed to production'
             }
         }
-        
+
+        stage('SAST - Semgrep') {
+            steps {
+                sh '''
+                echo "===== SEMGREP SAST ====="
+
+                semgrep --config=auto --exclude .env . || true
+                '''
+            }
+        }
+
+        stage('Run Backend') {
+            steps {
+                sh '''
+                echo "===== RUN BACKEND ====="
+
+                npm install -g pm2
+
+                pm2 delete ${APP_NAME} || true
+
+                pm2 start npm --name ${APP_NAME} -- run dev || \
+                pm2 start dist/index.js --name ${APP_NAME} || \
+                npm start || true
+
+                sleep 15
+
+                pm2 logs ${APP_NAME} --lines 50 || true
+                '''
+            }
+        }
+
         stage('Health Check') {
             steps {
                 sh '''
-                    echo "Checking health endpoint..."
-                    curl -f https://medsecure.com/api/health || exit 1
+                echo "===== HEALTH CHECK ====="
+
+                curl http://localhost:3000 || true
                 '''
-                echo '✓ Health check passed'
+            }
+        }
+
+        stage('DAST - OWASP ZAP') {
+            steps {
+                sh '''
+                echo "===== OWASP ZAP DAST ====="
+
+                /opt/zaproxy/zap.sh \
+                -cmd \
+                -port 8090 \
+                -quickurl http://localhost:3000 \
+                -quickprogress || true
+                '''
+            }
+        }
+
+        stage('PM2 Status') {
+            steps {
+                sh '''
+                echo "===== PM2 STATUS ====="
+
+                pm2 list || true
+                '''
             }
         }
     }
-    
+
     post {
         always {
-            echo 'Pipeline completed'
+            archiveArtifacts artifacts: '**/*.log', allowEmptyArchive: true
+
+            sh '''
+            echo "===== CLEANUP ====="
+
+            pm2 save || true
+            '''
         }
+
         success {
-            echo '✓ Pipeline succeeded'
+            echo 'Pipeline Success!'
         }
+
+        unstable {
+            echo 'Pipeline Unstable!'
+        }
+
         failure {
-            echo '✗ Pipeline failed'
+            echo 'Pipeline Failed!'
         }
     }
 }

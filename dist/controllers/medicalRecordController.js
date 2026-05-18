@@ -83,7 +83,7 @@ export const createRecord = async (req, res) => {
                 resourceId: record._id.toString(),
                 metadata: {
                     patientId: patient.patientId,
-                    blockchainHash: record.blockchainHash
+                    blockchainHash: record.blockchainHash,
                 },
             });
         }

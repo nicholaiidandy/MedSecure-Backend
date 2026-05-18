@@ -4,6 +4,7 @@ import User from '../models/User.js';
 import { logSecurityEvent } from '../utils/securityLogger.js';
 import { logAudit } from '../utils/auditLogger.js';
 import { AuthRequest } from '../middleware/auth.js';
+import { withMetrics } from '../utils/queryMetrics.js';
 
 const JWT_EXPIRE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
@@ -38,6 +39,7 @@ const clearTokenCookie = (res: Response) => {
 // @access  Public
 export const login = async (req: Request, res: Response) => {
   const { email, password } = req.body;
+  const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : email;
   const ipAddress = req.ip || req.socket.remoteAddress || 'unknown';
 
   try {
@@ -48,11 +50,15 @@ export const login = async (req: Request, res: Response) => {
       });
     }
 
-    const user = await User.findOne({ email }).select('+password');
+    const user = await withMetrics(
+      User.findOne({ email: normalizedEmail }).select('+password'),
+      'User',
+      'findOne_login'
+    );
 
     if (!user) {
       await logSecurityEvent('failed_login', ipAddress, `Failed login attempt for ${email}`, {
-        email,
+        email: normalizedEmail,
         severity: 'medium',
       });
       return res.status(401).json({
@@ -64,7 +70,7 @@ export const login = async (req: Request, res: Response) => {
     if (user.isLocked) {
       await logSecurityEvent('account_locked', ipAddress, `Login attempt on locked account: ${email}`, {
         userId: user._id.toString(),
-        email,
+        email: normalizedEmail,
         severity: 'high',
       });
       return res.status(403).json({
@@ -102,7 +108,7 @@ export const login = async (req: Request, res: Response) => {
 
       await logSecurityEvent('failed_login', ipAddress, `Failed login attempt ${user.failedAttempts}/5 for ${email}`, {
         userId: user._id.toString(),
-        email,
+        email: normalizedEmail,
         severity: user.failedAttempts >= 3 ? 'high' : 'medium',
       });
 
@@ -158,7 +164,11 @@ export const adminRegisterUser = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    const userExists = await User.findOne({ email });
+    const userExists = await withMetrics(
+      User.findOne({ email }),
+      'User',
+      'findOne_register_check'
+    );
 
     if (userExists) {
       return res.status(400).json({
@@ -167,12 +177,16 @@ export const adminRegisterUser = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    const user = await User.create({
-      name,
-      email,
-      password,
-      role,
-    });
+    const user = await withMetrics(
+      User.create({
+        name,
+        email,
+        password,
+        role,
+      }),
+      'User',
+      'create'
+    );
 
     if (req.user) {
       await logAudit(req.user, 'CREATE_USER', 'user', ipAddress, {
@@ -218,7 +232,11 @@ export const registerPatient = async (req: Request, res: Response) => {
       });
     }
 
-    const userExists = await User.findOne({ email });
+    const userExists = await withMetrics(
+      User.findOne({ email }),
+      'User',
+      'findOne_patient_register_check'
+    );
 
     if (userExists) {
       return res.status(400).json({
@@ -227,12 +245,16 @@ export const registerPatient = async (req: Request, res: Response) => {
       });
     }
 
-    const user = await User.create({
-      name,
-      email,
-      password,
-      role: 'patient'
-    });
+    const user = await withMetrics(
+      User.create({
+        name,
+        email,
+        password,
+        role: 'patient'
+      }),
+      'User',
+      'create_patient'
+    );
 
     await logAudit(user, 'SELF_REGISTER', 'auth', ipAddress, {
       metadata: { selfRegistered: true }
@@ -295,7 +317,11 @@ export const updatePassword = async (req: AuthRequest, res: Response) => {
   const ipAddress = req.ip || req.socket.remoteAddress || 'unknown';
 
   try {
-    const user = await User.findById(req.user?._id).select('+password');
+    const user = await withMetrics(
+      User.findById(req.user?._id).select('+password'),
+      'User',
+      'findById_change_password'
+    );
 
     if (!user) {
       return res.status(404).json({

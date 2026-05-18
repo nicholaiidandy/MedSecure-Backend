@@ -2,9 +2,29 @@ import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
 import { logSecurityEvent } from '../utils/securityLogger.js';
 import { logAudit } from '../utils/auditLogger.js';
+import { withMetrics } from '../utils/queryMetrics.js';
+const JWT_EXPIRE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const generateToken = (id) => {
     return jwt.sign({ id }, process.env.JWT_SECRET || 'default-secret', {
-        expiresIn: process.env.JWT_EXPIRE || '7d',
+        expiresIn: (process.env.JWT_EXPIRE || '7d'),
+    });
+};
+const setTokenCookie = (res, token) => {
+    const isProduction = process.env.NODE_ENV === 'production';
+    res.cookie('token', token, {
+        httpOnly: true,
+        secure: isProduction || process.env.USE_HTTPS === 'true',
+        sameSite: 'strict',
+        maxAge: JWT_EXPIRE_MS,
+        path: '/',
+    });
+};
+const clearTokenCookie = (res) => {
+    res.clearCookie('token', {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production' || process.env.USE_HTTPS === 'true',
+        sameSite: 'strict',
+        path: '/',
     });
 };
 // @desc    Login user
@@ -12,6 +32,7 @@ const generateToken = (id) => {
 // @access  Public
 export const login = async (req, res) => {
     const { email, password } = req.body;
+    const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : email;
     const ipAddress = req.ip || req.socket.remoteAddress || 'unknown';
     try {
         if (!email || !password) {
@@ -20,10 +41,10 @@ export const login = async (req, res) => {
                 message: 'Please provide email and password',
             });
         }
-        const user = await User.findOne({ email }).select('+password');
+        const user = await withMetrics(User.findOne({ email: normalizedEmail }).select('+password'), 'User', 'findOne_login');
         if (!user) {
             await logSecurityEvent('failed_login', ipAddress, `Failed login attempt for ${email}`, {
-                email,
+                email: normalizedEmail,
                 severity: 'medium',
             });
             return res.status(401).json({
@@ -34,7 +55,7 @@ export const login = async (req, res) => {
         if (user.isLocked) {
             await logSecurityEvent('account_locked', ipAddress, `Login attempt on locked account: ${email}`, {
                 userId: user._id.toString(),
-                email,
+                email: normalizedEmail,
                 severity: 'high',
             });
             return res.status(403).json({
@@ -65,7 +86,7 @@ export const login = async (req, res) => {
             await user.save();
             await logSecurityEvent('failed_login', ipAddress, `Failed login attempt ${user.failedAttempts}/5 for ${email}`, {
                 userId: user._id.toString(),
-                email,
+                email: normalizedEmail,
                 severity: user.failedAttempts >= 3 ? 'high' : 'medium',
             });
             return res.status(401).json({
@@ -80,6 +101,7 @@ export const login = async (req, res) => {
         await user.save();
         await logAudit(user, 'LOGIN', 'auth', ipAddress);
         const token = generateToken(user._id.toString());
+        setTokenCookie(res, token);
         res.status(200).json({
             success: true,
             token,
@@ -113,19 +135,19 @@ export const adminRegisterUser = async (req, res) => {
                 message: 'Please provide name, email, password, and role',
             });
         }
-        const userExists = await User.findOne({ email });
+        const userExists = await withMetrics(User.findOne({ email }), 'User', 'findOne_register_check');
         if (userExists) {
             return res.status(400).json({
                 success: false,
                 message: 'User already exists',
             });
         }
-        const user = await User.create({
+        const user = await withMetrics(User.create({
             name,
             email,
             password,
             role,
-        });
+        }), 'User', 'create');
         if (req.user) {
             await logAudit(req.user, 'CREATE_USER', 'user', ipAddress, {
                 resourceId: user._id.toString(),
@@ -133,15 +155,16 @@ export const adminRegisterUser = async (req, res) => {
             });
         }
         const token = generateToken(user._id.toString());
+        setTokenCookie(res, token);
         res.status(201).json({
             success: true,
+            token,
             user: {
                 id: user._id,
                 name: user.name,
                 email: user.email,
                 role: user.role,
             },
-            token,
         });
     }
     catch (error) {
@@ -165,32 +188,33 @@ export const registerPatient = async (req, res) => {
                 message: 'Please provide name, email, and password',
             });
         }
-        const userExists = await User.findOne({ email });
+        const userExists = await withMetrics(User.findOne({ email }), 'User', 'findOne_patient_register_check');
         if (userExists) {
             return res.status(400).json({
                 success: false,
                 message: 'Email already exists',
             });
         }
-        const user = await User.create({
+        const user = await withMetrics(User.create({
             name,
             email,
             password,
             role: 'patient'
-        });
+        }), 'User', 'create_patient');
         await logAudit(user, 'SELF_REGISTER', 'auth', ipAddress, {
             metadata: { selfRegistered: true }
         });
         const token = generateToken(user._id.toString());
+        setTokenCookie(res, token);
         res.status(201).json({
             success: true,
+            token,
             user: {
                 id: user._id,
                 name: user.name,
                 email: user.email,
                 role: user.role,
             },
-            token,
         });
     }
     catch (error) {
@@ -234,7 +258,7 @@ export const updatePassword = async (req, res) => {
     const { currentPassword, newPassword } = req.body;
     const ipAddress = req.ip || req.socket.remoteAddress || 'unknown';
     try {
-        const user = await User.findById(req.user?._id).select('+password');
+        const user = await withMetrics(User.findById(req.user?._id).select('+password'), 'User', 'findById_change_password');
         if (!user) {
             return res.status(404).json({
                 success: false,
@@ -263,4 +287,14 @@ export const updatePassword = async (req, res) => {
             message: 'Server error',
         });
     }
+};
+// @desc    Logout user / clear cookie
+// @route   POST /api/auth/logout
+// @access  Public
+export const logout = async (req, res) => {
+    clearTokenCookie(res);
+    res.status(200).json({
+        success: true,
+        message: 'Logged out successfully',
+    });
 };

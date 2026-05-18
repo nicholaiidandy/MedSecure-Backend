@@ -156,7 +156,7 @@ backend/
 
 Setelah seeding, gunakan credentials berikut untuk testing:
 
-- **Doctor**: doctor@medical.com / doctor123
+- **Doctor**: nicholai@doctor.com / nicholai123
 - **Nurse**: nurse@medical.com / nurse123
 - **Admin**: admin@medical.com / admin123
 
